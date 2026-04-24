@@ -2,12 +2,12 @@
 AI Reel Generator — Ngrok Tunnel Launcher
 ==========================================
 Creates a public ngrok URL for the AI Reel Generator.
-Designed to run on GitHub Actions or locally on your PC.
+Reads NGROK_AUTH_TOKEN from environment variable.
 
 Usage:
-    python tunnel.py                     # Tunnel to localhost:8000
-    python tunnel.py --port 3000         # Different port
-    python tunnel.py --token YOUR_TOKEN  # Ngrok auth token
+    export NGROK_AUTH_TOKEN=your_token  (or set as GitHub secret)
+    python tunnel.py
+    python tunnel.py --port 3000
 """
 
 import argparse
@@ -17,16 +17,22 @@ import signal
 import os
 
 try:
-    from pyngrok import ngrok, conf
+    from pyngrok import ngrok
 except ImportError:
     print("\n[!] pyngrok is not installed. Run:  pip install pyngrok\n")
     sys.exit(1)
 
 
-def start_tunnel(port, token):
-    if token:
-        print(f"[*] Setting ngrok auth token...")
-        ngrok.set_auth_token(token)
+def start_tunnel(port):
+    token = os.environ.get("NGROK_AUTH_TOKEN", "").strip()
+    if not token:
+        print("[ERROR] NGROK_AUTH_TOKEN environment variable is not set.")
+        print("  Set it with:  export NGROK_AUTH_TOKEN=your_token")
+        print("  Get a free token at: https://dashboard.ngrok.com/get-started/your-authtoken")
+        sys.exit(1)
+
+    print(f"[*] Setting ngrok auth token ({len(token)} chars)...")
+    ngrok.set_auth_token(token)
 
     print(f"[*] Creating tunnel to localhost:{port} ...")
 
@@ -53,22 +59,16 @@ def start_tunnel(port, token):
     print("=" * 55)
     print()
 
-    # Write URL to file (GitHub Actions can read this)
     with open("tunnel_url.txt", "w") as f:
         f.write(https_url)
 
-    # Set GitHub Actions output if running in CI
-    github_output = os.environ.get("GITHUB_OUTPUT")
-    if github_output:
-        with open(github_output, "a") as f:
-            f.write(f"tunnel_url={https_url}\n")
-        github_step = os.environ.get("GITHUB_STEP_SUMMARY")
-        if github_step:
-            with open(github_step, "a") as f:
-                f.write(f"## Reel Generator Mobile URL\n\n")
-                f.write(f"**Open this on your phone:**\n\n")
-                f.write(f"### [{https_url}]({https_url})\n\n")
-                f.write(f"Tunnel is active until you cancel this workflow.\n")
+    github_step = os.environ.get("GITHUB_STEP_SUMMARY")
+    if github_step:
+        with open(github_step, "a") as f:
+            f.write(f"## Reel Generator Mobile URL\n\n")
+            f.write(f"**Open this on your phone:**\n\n")
+            f.write(f"### [{https_url}]({https_url})\n\n")
+            f.write(f"Tunnel is active until you cancel this workflow.\n")
 
     return tunnel
 
@@ -78,16 +78,14 @@ def main():
         description="AI Reel Generator — Ngrok Tunnel for Mobile Access"
     )
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--token", type=str, default=None)
     args = parser.parse_args()
 
-    token = args.token or os.environ.get("NGROK_AUTH_TOKEN")
-    tunnel = start_tunnel(args.port, token)
+    tunnel = start_tunnel(args.port)
 
     def shutdown(sig, frame):
         print("\n[*] Shutting down tunnel...")
         ngrok.kill()
-        print("[✓] Done.")
+        print("[Done]")
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown)
@@ -98,11 +96,10 @@ def main():
     try:
         while True:
             time.sleep(30)
-            # Keep-alive check
             tunnels = ngrok.get_tunnels()
             if not tunnels:
                 print("[!] Tunnel dropped. Reconnecting...")
-                tunnel = start_tunnel(args.port, token)
+                tunnel = start_tunnel(args.port)
     except KeyboardInterrupt:
         shutdown(None, None)
 
