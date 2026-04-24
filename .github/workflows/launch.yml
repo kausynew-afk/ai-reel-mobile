@@ -37,7 +37,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
 
-      - name: Install Reel Generator dependencies
+      - name: Install dependencies
         run: pip install -r reel-app/backend/requirements.txt
 
       - name: Install Cloudflare Tunnel
@@ -46,7 +46,15 @@ jobs:
           sudo dpkg -i cloudflared.deb
           cloudflared --version
 
+      - name: Patch server for cloud deployment
+        run: |
+          cp reel-app/backend/main.py reel-app/backend/main.py.bak
+          cp cloud_main_patch.py reel-app/backend/main.py
+          echo "[✓] Server patched for cloud deployment"
+
       - name: Start Reel Generator server
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           cd reel-app/backend
           python -m uvicorn main:app --host 0.0.0.0 --port 8000 &
@@ -55,9 +63,7 @@ jobs:
 
       - name: Start Tunnel & Show URL
         run: |
-          # Start cloudflared and capture the URL
           cloudflared tunnel --url http://localhost:8000 --no-tls-verify 2>&1 | tee cloudflared.log &
-          TUNNEL_PID=$!
 
           echo "[*] Waiting for tunnel URL..."
           TUNNEL_URL=""
@@ -70,7 +76,7 @@ jobs:
           done
 
           if [ -z "$TUNNEL_URL" ]; then
-            echo "ERROR: Tunnel failed to start. Log output:"
+            echo "ERROR: Tunnel failed to start."
             cat cloudflared.log
             exit 1
           fi
@@ -85,9 +91,7 @@ jobs:
           echo "  >>> $TUNNEL_URL"
           echo ""
           echo "========================================================="
-          echo ""
 
-          # Write to workflow summary (visible on the Actions run page)
           cat >> $GITHUB_STEP_SUMMARY <<EOF
 
           ## Reel Generator Mobile URL
@@ -96,10 +100,12 @@ jobs:
 
           ### $TUNNEL_URL
 
-          Tunnel is active until you cancel this workflow or it times out.
+          Tunnel is active until you cancel this workflow.
           EOF
 
       - name: Keep alive
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           DURATION=${{ github.event.inputs.duration_minutes || '60' }}
           TUNNEL_URL=$(cat tunnel_url.txt)
