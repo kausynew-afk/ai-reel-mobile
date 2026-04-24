@@ -111,9 +111,10 @@ jobs:
             echo "Server log (last 30 lines):"
             tail -30 /tmp/server.log 2>/dev/null || echo "(no log)"
 
-            if [ "$HTTP_CODE" = "429" ] || grep -q "RESOURCE_EXHAUSTED" /tmp/api_response.json 2>/dev/null; then
+            if [ "$HTTP_CODE" = "429" ] || grep -qiE "quota|rate.limit|RESOURCE_EXHAUSTED|429" /tmp/api_response.json 2>/dev/null; then
               echo ""
-              echo "[!] Rate limited but API key is valid. Continuing..."
+              echo "[!] Rate limited / quota exceeded — API key is valid but free tier is exhausted."
+              echo "[!] The server works. Continuing to start tunnel..."
               exit 0
             fi
             exit 1
