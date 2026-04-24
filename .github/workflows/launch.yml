@@ -37,55 +37,67 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
 
-      - name: Install dependencies
-        run: |
-          pip install -r reel-app/backend/requirements.txt
-          pip install pyngrok
+      - name: Install Reel Generator dependencies
+        run: pip install -r reel-app/backend/requirements.txt
 
-      - name: Verify Ngrok Token
-        env:
-          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+      - name: Install Cloudflare Tunnel
         run: |
-          if [ -z "$NGROK_AUTH_TOKEN" ]; then
-            echo "ERROR: NGROK_AUTH_TOKEN secret is not set!"
-            echo "Go to repo Settings → Secrets → Actions → New secret"
-            exit 1
-          fi
-          echo "[✓] NGROK_AUTH_TOKEN is set (${#NGROK_AUTH_TOKEN} chars)"
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+          cloudflared --version
 
       - name: Start Reel Generator server
         run: |
           cd reel-app/backend
           python -m uvicorn main:app --host 0.0.0.0 --port 8000 &
           sleep 5
-          curl -sf http://localhost:8000/api/bgm/library > /dev/null && echo "[✓] Server running on port 8000" || echo "[!] Server may not be ready"
+          curl -sf http://localhost:8000/api/bgm/library > /dev/null && echo "[✓] Server running on port 8000" || echo "[!] Server not ready"
 
-      - name: Start Ngrok Tunnel & Show URL
-        env:
-          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+      - name: Start Tunnel & Show URL
         run: |
-          python tunnel.py &
-          sleep 15
+          # Start cloudflared and capture the URL
+          cloudflared tunnel --url http://localhost:8000 --no-tls-verify 2>&1 | tee cloudflared.log &
+          TUNNEL_PID=$!
 
-          if [ ! -f tunnel_url.txt ]; then
-            echo "ERROR: Tunnel failed to start. Check your NGROK_AUTH_TOKEN."
+          echo "[*] Waiting for tunnel URL..."
+          TUNNEL_URL=""
+          for i in $(seq 1 30); do
+            sleep 2
+            TUNNEL_URL=$(grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' cloudflared.log | head -1)
+            if [ -n "$TUNNEL_URL" ]; then
+              break
+            fi
+          done
+
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "ERROR: Tunnel failed to start. Log output:"
+            cat cloudflared.log
             exit 1
           fi
 
-          TUNNEL_URL=$(cat tunnel_url.txt)
+          echo "$TUNNEL_URL" > tunnel_url.txt
+
           echo ""
           echo "========================================================="
+          echo ""
           echo "  OPEN THIS URL ON YOUR PHONE:"
+          echo ""
           echo "  >>> $TUNNEL_URL"
+          echo ""
           echo "========================================================="
+          echo ""
 
-          echo "## Reel Generator Mobile URL" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Open this on your phone:**" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### $TUNNEL_URL" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Tunnel is active until you cancel this workflow." >> $GITHUB_STEP_SUMMARY
+          # Write to workflow summary (visible on the Actions run page)
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+
+          ## Reel Generator Mobile URL
+
+          **Open this link on your phone:**
+
+          ### $TUNNEL_URL
+
+          Tunnel is active until you cancel this workflow or it times out.
+          EOF
 
       - name: Keep alive
         run: |
