@@ -47,6 +47,21 @@ video_composer = VideoComposer()
 anti_detect = AntiDetect()
 
 
+def _find_session(session_id: str, required_file: str = None):
+    """Find a valid session dir. Falls back to the most recent session if needed."""
+    if session_id:
+        session_dir = OUTPUT_DIR / session_id
+        if session_dir.exists():
+            if required_file is None or (session_dir / required_file).exists():
+                return session_dir
+
+    for d in sorted(OUTPUT_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+        if d.is_dir():
+            if required_file is None or (d / required_file).exists():
+                return d
+    return None
+
+
 async def _get_body(request: Request) -> dict:
     """Parse request body as JSON or form data."""
     content_type = request.headers.get("content-type", "")
@@ -103,14 +118,28 @@ async def generate_voice(request: Request):
     session_dir = OUTPUT_DIR / session_id
     session_dir.mkdir(exist_ok=True)
 
-    script_file = session_dir / "script.json"
-    if not script_file.exists():
-        raise HTTPException(status_code=400, detail="Generate script first")
+    text = data.get("script", "").strip()
 
-    script_data = json.loads(script_file.read_text(encoding="utf-8"))
-    text = script_data.get("full_script", "")
     if not text:
-        raise HTTPException(status_code=400, detail="No script text found")
+        script_file = session_dir / "script.json"
+        if script_file.exists():
+            script_data = json.loads(script_file.read_text(encoding="utf-8"))
+            text = script_data.get("full_script", "")
+
+    if not text:
+        for d in sorted(OUTPUT_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if d.is_dir():
+                sf = d / "script.json"
+                if sf.exists():
+                    sd = json.loads(sf.read_text(encoding="utf-8"))
+                    text = sd.get("full_script", "")
+                    if text:
+                        session_id = d.name
+                        session_dir = d
+                        break
+
+    if not text:
+        raise HTTPException(status_code=400, detail="No script text found. Pass 'script' in the request or generate a script first.")
 
     try:
         result = await voice_gen.generate(text=text, voice=voice, output_dir=session_dir)
@@ -127,13 +156,12 @@ async def generate_avatar(request: Request):
     mode = data.get("avatar_type", data.get("mode", "animated"))
     preset = data.get("avatar_preset", "default")
 
-    session_dir = OUTPUT_DIR / session_id
-    if not session_dir.exists():
-        raise HTTPException(status_code=404, detail="Session not found. Generate script first.")
+    session_dir = _find_session(session_id, "voiceover.mp3")
+    if session_dir is None:
+        raise HTTPException(status_code=400, detail="Generate voiceover first")
+    session_id = session_dir.name
 
     audio_path = session_dir / "voiceover.mp3"
-    if not audio_path.exists():
-        raise HTTPException(status_code=400, detail="Generate voiceover first")
 
     if mode in ("sadtalker", "realistic"):
         mode = "animated"
@@ -167,9 +195,11 @@ async def select_bgm(request: Request):
     category = data.get("category", "comedy")
     volume = float(data.get("volume", 0.15))
 
-    session_dir = OUTPUT_DIR / session_id
-    if not session_dir.exists():
-        raise HTTPException(status_code=404, detail="Session not found")
+    session_dir = _find_session(session_id)
+    if session_dir is None:
+        session_dir = OUTPUT_DIR / (session_id or str(uuid.uuid4()))
+        session_dir.mkdir(exist_ok=True)
+    session_id = session_dir.name
 
     try:
         result = await bgm_gen.select(
@@ -199,9 +229,10 @@ async def compose_video(request: Request):
         captions = captions.lower() in ("true", "1", "yes")
     caption_style = data.get("caption_style", "word_highlight")
 
-    session_dir = OUTPUT_DIR / session_id
-    if not session_dir.exists():
-        raise HTTPException(status_code=404, detail="Session not found")
+    session_dir = _find_session(session_id, "voiceover.mp3")
+    if session_dir is None:
+        raise HTTPException(status_code=400, detail="Generate voiceover first")
+    session_id = session_dir.name
 
     try:
         result = await video_composer.compose(
@@ -225,9 +256,10 @@ async def finalize_video(request: Request):
     grain = grain_map.get(anti_detect_level, 0.02)
     room_tone = anti_detect_level != "light"
 
-    session_dir = OUTPUT_DIR / session_id
-    if not session_dir.exists():
-        raise HTTPException(status_code=404, detail="Session not found")
+    session_dir = _find_session(session_id, "composed.mp4")
+    if session_dir is None:
+        raise HTTPException(status_code=400, detail="Compose video first")
+    session_id = session_dir.name
 
     try:
         result = await anti_detect.process(
