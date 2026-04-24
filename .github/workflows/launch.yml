@@ -1,0 +1,96 @@
+name: Launch Reel Generator for Mobile
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: "How long to keep the server alive (minutes)"
+        required: false
+        default: "60"
+        type: choice
+        options:
+          - "30"
+          - "60"
+          - "120"
+          - "180"
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout tunnel repo
+        uses: actions/checkout@v4
+
+      - name: Clone AI Reel Generator
+        run: |
+          git clone https://github.com/kausynew-afk/ai-reel-generator.git reel-app
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      - name: Install Reel Generator dependencies
+        run: |
+          pip install -r reel-app/backend/requirements.txt
+          pip install pyngrok
+
+      - name: Start Reel Generator server
+        run: |
+          cd reel-app/backend
+          python -m uvicorn main:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+          echo "Server started on port 8000"
+          curl -s http://localhost:8000/api/bgm/library | head -c 100
+          echo ""
+
+      - name: Start Ngrok Tunnel
+        env:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+        run: |
+          python tunnel.py --token "$NGROK_AUTH_TOKEN" &
+          TUNNEL_PID=$!
+          sleep 10
+
+          # Read the URL
+          if [ -f tunnel_url.txt ]; then
+            TUNNEL_URL=$(cat tunnel_url.txt)
+            echo ""
+            echo "========================================================="
+            echo "  OPEN THIS URL ON YOUR PHONE:"
+            echo "  >>> $TUNNEL_URL"
+            echo "========================================================="
+            echo ""
+          else
+            echo "ERROR: Tunnel failed to start"
+            exit 1
+          fi
+
+      - name: Keep alive
+        run: |
+          DURATION=${{ github.event.inputs.duration_minutes || '60' }}
+          TUNNEL_URL=$(cat tunnel_url.txt)
+          echo ""
+          echo "========================================================="
+          echo "  YOUR MOBILE URL: $TUNNEL_URL"
+          echo "  Server will stay alive for $DURATION minutes."
+          echo "  Cancel this workflow when you're done."
+          echo "========================================================="
+          echo ""
+
+          END_TIME=$((SECONDS + DURATION * 60))
+          while [ $SECONDS -lt $END_TIME ]; do
+            REMAINING=$(( (END_TIME - SECONDS) / 60 ))
+            echo "[$(date '+%H:%M:%S')] Server alive — $REMAINING min remaining — URL: $TUNNEL_URL"
+            sleep 60
+          done
+
+          echo ""
+          echo "[*] Time's up. Server shutting down."

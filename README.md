@@ -1,58 +1,48 @@
-# AI Reel Generator — Ngrok Tunnel for Mobile Access
+# AI Reel Generator — Mobile Access
 
-A lightweight companion tool that creates a public tunnel to your local [AI Reel Generator](https://github.com/kausynew-afk/ai-reel-generator), so you can use it from **any mobile device, anywhere** — not just on the same WiFi.
+Run the [AI Reel Generator](https://github.com/kausynew-afk/ai-reel-generator) from your phone using GitHub Actions + Ngrok tunnel.
 
-## Quick Start
+## How to Use (From Your Phone)
 
-```bash
-# 1. Clone this repo
-git clone https://github.com/kausynew-afk/ai-reel-tunnel.git
-cd ai-reel-tunnel
+### One-time Setup
 
-# 2. Install dependencies
-pip install -r requirements.txt
+1. Get a **free** ngrok auth token at [ngrok.com](https://ngrok.com)
+2. Go to this repo's **Settings → Secrets → Actions**
+3. Add a secret: Name = `NGROK_AUTH_TOKEN`, Value = your token
 
-# 3. Make sure your AI Reel Generator is running on port 8000
+### Launch the Server
 
-# 4. Start the tunnel
-python tunnel.py
-```
+1. Open this repo on your phone (GitHub app or browser)
+2. Go to **Actions** tab
+3. Click **"Launch Reel Generator for Mobile"**
+4. Click **"Run workflow"** → choose duration → **Run**
+5. Open the running workflow → look for the **URL** in the logs
+6. Open that URL on your phone — the full Reel Generator is ready!
 
-A **QR code** will appear in your terminal — scan it with your phone camera to open the reel generator on mobile.
+### When Done
 
-## Options
-
-```bash
-python tunnel.py                     # Default: tunnel to localhost:8000
-python tunnel.py --port 3000         # Use a different port
-python tunnel.py --token YOUR_TOKEN  # Use your ngrok auth token (free account)
-```
-
-## Ngrok Auth Token (Recommended)
-
-For better reliability, get a **free** ngrok auth token:
-
-1. Sign up at [ngrok.com](https://ngrok.com)
-2. Copy your token from the dashboard
-3. Run: `python tunnel.py --token YOUR_TOKEN`
-
-Or set it as an environment variable:
-```bash
-set NGROK_AUTH_TOKEN=YOUR_TOKEN    # Windows
-export NGROK_AUTH_TOKEN=YOUR_TOKEN  # Mac/Linux
-```
+Cancel the workflow to stop the server, or it auto-stops after the chosen duration.
 
 ## How It Works
 
 ```
-┌─────────────┐     Ngrok Tunnel     ┌──────────────────┐
-│  Your Phone  │ ◄══════════════════► │  Your PC         │
-│  (anywhere)  │   public HTTPS URL   │  localhost:8000   │
-└─────────────┘                       │  (Reel Generator) │
-                                      └──────────────────┘
+┌─────────────┐     Ngrok Tunnel     ┌───────────────────────┐
+│  Your Phone  │ ◄══════════════════► │  GitHub Actions Runner │
+│  (browser)   │   public HTTPS URL   │  (Reel Generator)      │
+└─────────────┘                       └───────────────────────┘
 ```
 
-1. AI Reel Generator runs on your PC at `localhost:8000`
-2. This tool creates a public ngrok tunnel
-3. Scan the QR code → your phone connects to the PC through the tunnel
-4. Full reel generation pipeline works from your mobile browser
+1. GitHub Actions spins up a cloud server
+2. Installs Python, FFmpeg, and all dependencies
+3. Starts the AI Reel Generator on the runner
+4. Creates an ngrok tunnel → gives you a public URL
+5. You open the URL on your phone and create reels
+
+## Local Usage
+
+You can also run the tunnel locally on your PC:
+
+```bash
+pip install -r requirements.txt
+python tunnel.py --token YOUR_NGROK_TOKEN
+```
