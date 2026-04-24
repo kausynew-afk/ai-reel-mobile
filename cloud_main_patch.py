@@ -118,6 +118,7 @@ async def generate_voice(request: Request):
     session_dir = OUTPUT_DIR / session_id
     session_dir.mkdir(exist_ok=True)
 
+    genre = data.get("genre", data.get("tone", "comedy"))
     text = data.get("script", "").strip()
 
     if not text:
@@ -142,7 +143,7 @@ async def generate_voice(request: Request):
         raise HTTPException(status_code=400, detail="No script text found. Pass 'script' in the request or generate a script first.")
 
     try:
-        result = await voice_gen.generate(text=text, voice=voice, output_dir=session_dir)
+        result = await voice_gen.generate(text=text, voice=voice, output_dir=session_dir, genre=genre)
         result["session_id"] = session_id
         return JSONResponse(result)
     except Exception as e:
