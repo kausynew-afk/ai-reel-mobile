@@ -37,41 +37,80 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
 
-      - name: Install Reel Generator dependencies
+      - name: Install dependencies
         run: |
           pip install -r reel-app/backend/requirements.txt
           pip install pyngrok
+
+      - name: Configure Ngrok
+        env:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+        run: |
+          echo "[*] Verifying ngrok token..."
+          if [ -z "$NGROK_AUTH_TOKEN" ]; then
+            echo "ERROR: NGROK_AUTH_TOKEN secret is not set!"
+            echo "Go to repo Settings → Secrets → Actions → New secret"
+            echo "Name: NGROK_AUTH_TOKEN"
+            echo "Value: your token from https://dashboard.ngrok.com/get-started/your-authtoken"
+            exit 1
+          fi
+          echo "[*] Token length: ${#NGROK_AUTH_TOKEN} chars"
+          python -c "
+          from pyngrok import ngrok
+          ngrok.set_auth_token('$NGROK_AUTH_TOKEN')
+          print('[✓] Ngrok auth token set successfully')
+          "
 
       - name: Start Reel Generator server
         run: |
           cd reel-app/backend
           python -m uvicorn main:app --host 0.0.0.0 --port 8000 &
           sleep 5
-          echo "Server started on port 8000"
-          curl -s http://localhost:8000/api/bgm/library | head -c 100
-          echo ""
+          echo "[*] Checking server..."
+          curl -sf http://localhost:8000/api/bgm/library > /dev/null && echo "[✓] Server is running on port 8000" || echo "[!] Server may not be ready yet"
 
-      - name: Start Ngrok Tunnel
+      - name: Start Ngrok Tunnel & Show URL
         env:
           NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
         run: |
-          python tunnel.py --token "$NGROK_AUTH_TOKEN" &
-          TUNNEL_PID=$!
+          python -c "
+          from pyngrok import ngrok
+          import sys
+
+          ngrok.set_auth_token('$NGROK_AUTH_TOKEN')
+          try:
+              tunnel = ngrok.connect(8000, 'http')
+              url = tunnel.public_url.replace('http://', 'https://')
+              print()
+              print('=' * 60)
+              print('  OPEN THIS URL ON YOUR PHONE:')
+              print(f'  >>> {url}')
+              print('=' * 60)
+              print()
+              with open('tunnel_url.txt', 'w') as f:
+                  f.write(url)
+          except Exception as e:
+              print(f'ERROR: {e}')
+              sys.exit(1)
+          " &
+
           sleep 10
 
-          # Read the URL
-          if [ -f tunnel_url.txt ]; then
-            TUNNEL_URL=$(cat tunnel_url.txt)
-            echo ""
-            echo "========================================================="
-            echo "  OPEN THIS URL ON YOUR PHONE:"
-            echo "  >>> $TUNNEL_URL"
-            echo "========================================================="
-            echo ""
-          else
-            echo "ERROR: Tunnel failed to start"
+          if [ ! -f tunnel_url.txt ]; then
+            echo "ERROR: Tunnel failed to start. Check your NGROK_AUTH_TOKEN."
             exit 1
           fi
+
+          TUNNEL_URL=$(cat tunnel_url.txt)
+
+          # Write to job summary (visible on workflow run page)
+          echo "## 📱 Reel Generator Mobile URL" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Open this on your phone:**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### $TUNNEL_URL" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Tunnel is active until you cancel this workflow." >> $GITHUB_STEP_SUMMARY
 
       - name: Keep alive
         run: |
